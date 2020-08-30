@@ -1,6 +1,62 @@
 ﻿using System;
 using UnityEngine;
 
+public enum MovementState
+{
+    Idle,
+    Running,
+    Jumping,
+    Falling,
+    WallHugging,
+    Dashing,
+    GroundPounding,
+    Crouching
+}
+
+public class CharacterModel
+{
+    public MovementState MovementState { get; set; }
+    public float HorizontalMovement = 0f;
+    public float VelocityX = 0f;
+    public float VelocityY = 0f;
+    public Vector2 VelocityBoost;
+    public float VelocityBoostCooldown = 0f;
+    public Vector3 WallHugCheckLeftPos;
+    public Vector3 WallHugCheckRightPos;
+    public bool IsFacingRight = true;
+    public bool IsGrounded = false;
+    public bool WasGrounded = true;
+    public bool AbilitiesLocked = false;
+    public bool HitHead = false;
+    public bool KillVelocityBoostOnHittingWall = false;
+    public bool KillVelocityBoostOnLanding = false;
+    public bool IsWallHugging = false;
+    public bool IsCrouching = false;
+    public float DashCooldownClock = 0f;
+    public float GroundPoundCooldownClock = 0f;
+    public bool LockVelocityX = false;
+    public bool LockVelocityY = false;
+    public int DoubleJumpsDone = 0;
+    public Transform GroundCheck;
+    public Transform CeilingCheck;
+}
+
+public class TriggerModel
+{
+    public bool Jump = false;
+    public bool Dash = false;
+    public bool GroundPound = false;
+}
+
+public class CameraModel
+{
+    public float CameraX = 0f;
+    public float CameraY = 0f;
+}
+
+[RequireComponent(typeof(Rigidbody2D))]
+[RequireComponent(typeof(Collider2D))]
+[RequireComponent(typeof(SpriteRenderer))]
 public class PlayerController : MonoBehaviour
 {
     //General settings
@@ -10,263 +66,363 @@ public class PlayerController : MonoBehaviour
     public float nearObjectSensitivity = 0.23f;
 
     //Camera settings
-    public Camera playerCamera;
-    public bool cameraFollowX = true;
-    public bool cameraFollowY = true;
-    public bool smoothCamera = true;
-    public float cameraDamping = 2f;
+    [Serializable]
+    protected class CameraSettings
+    {
+        public Camera PlayerCamera;
+        public bool CameraFollowX = true;
+        public bool CameraFollowY = true;
+        public bool SmoothCamera = false;
+        public float CameraDamping = 2f;
+    }
 
     //Double Jump settings
-    public bool useDoubleJump = false;
-    public int maxDoubleJumps = 2;
+    [Serializable]
+    protected class DoubleJumpSettings
+    {
+        public bool UseDoubleJump = false;
+        public int MaxDoubleJumps = 2;
+    }
 
     //Wall Climb settings
-    public bool useWallClimb = false;
-    public float wallSlideVelocity = 0.6f;
-    public float wallJumpPushAwayForce = 40f;
-    public float wallJumpAwayDuration = 0.1f;
+    [Serializable]
+    protected class WallClimbSettings
+    {
+        public bool UseWallClimb = false;
+        public float WallSlideVelocity = 0.6f;
+        public float WallJumpPushAwayForce = 5f;
+        public float WallJumpAwayDuration = 0.1f;
+    }
 
     //Dash settings
-    public bool useDash = false;
-    public float dashForce = 40f;
-    public float dashDuration = 0.15f;
-    public bool dashLocksY = false;
-    public float dashCooldown = 0.8f;
+    [Serializable]
+    protected class DashSettings
+    {
+        public bool UseDash = false;
+        public float DashForce = 40f;
+        public float DashDuration = 0.15f;
+        public bool DashLocksY = true;
+        public float DashCooldown = 0.8f;
+    }
 
     //Ground Pounch Settings
-    public bool useGroundPound = false;
-    public float groundPoundVelocity = 20f;
-    public bool groundPoundLocksX = true;
-    public float groundPoundCooldown = 0.5f;
+    [Serializable]
+    protected class GroundPoundSettings
+    {
+        public bool UseGroundPound = false;
+        public float GroundPoundVelocity = 20f;
+        public bool GroundPoundLocksX = true;
+        public float GroundPoundCooldown = 0.5f;
+    }
 
     //Local variables
-    float horizontalMovement = 0f;
-    SpriteRenderer sprite;
-    float velocityX = 0f;
-    float velocityY = 0f;
-    Vector2 velocityBoost;
-    float velocityBoostCooldown = 0f;
+    private CharacterModel _character;
+    private CameraModel _camera;
+    private TriggerModel _trigger;
 
-    Vector3 wallHugCheckLeftPos;
-    Vector3 wallHugCheckRightPos;
+    [SerializeField] private CameraSettings _cameraSettings = null;
+    [SerializeField] private DoubleJumpSettings _doubleJumpSettings = null;
+    [SerializeField] private WallClimbSettings _wallClimbSettings = null;
+    [SerializeField] private DashSettings _dashSettings = null;
+    [SerializeField] private GroundPoundSettings _groundPoundSettings = null;
 
-    bool isFacingRight = true;
-    bool isGrounded = false;
-    bool wasGrounded = true;
-    bool abilitiesLocked = false;
-    bool hitHead = false;
-    bool killVelocityBoostOnLanding = false;
-    bool isWallHugging = false;
-    bool isCrouching = false;
-    bool dashTriggered = false;
-    float dashCooldownClock = 0f;
-    bool groundPoundTriggered = false;
-    float groundPoundCooldownClock = 0f;
-
-    bool lockVelocityX = false;
-    bool lockVelocityY = false;
-
-    bool jumpTriggered = false;
-
-    int doubleJumpsDone = 0;
-
-    new Rigidbody2D rigidbody;
-    Collider2D hitBox;
-    Transform groundCheck;
-    Transform ceilingCheck;
-    float cameraX = 0f;
-    float cameraY = 0f;
+    private SpriteRenderer sprite;
+    private Animator animator;
+    private new Rigidbody2D rigidbody;
+    private Collider2D hitBox;
 
     // Check every collider except Player and Ignore Raycast
     LayerMask layerMask = ~(1 << 2 | 1 << 8);
+
+    private void Awake()
+    {
+        _character = new CharacterModel
+        {
+            //If you want to set start variables that differ from model's initial values, do it here.
+        };
+
+        _camera = new CameraModel
+        {
+            //Same goes for this one etc. etc.
+        };
+
+        _doubleJumpSettings = new DoubleJumpSettings() { UseDoubleJump = true };
+        _wallClimbSettings = new WallClimbSettings() { UseWallClimb = true };
+        _dashSettings = new DashSettings() { UseDash = true };
+        _groundPoundSettings = new GroundPoundSettings() { UseGroundPound = true };
+        _trigger = new TriggerModel();
+    }
 
     // Use this for initialization
     void Start()
     {
         sprite = GetComponent<SpriteRenderer>();
+        animator = GetComponent<Animator>();
         rigidbody = GetComponent<Rigidbody2D>();
         hitBox = GetComponent<Collider2D>();
 
-        groundCheck = transform.Find("GroundCheck").transform;
-        ceilingCheck = transform.Find("CeilingCheck").transform;
+        var groundCheckName = "GroundCheck";
+        var ceilingCheckName = "CeilingCheck";
+        AssertVitalComponents(groundCheckName, ceilingCheckName);
+
+        _character.GroundCheck = transform.Find(groundCheckName).transform;
+        _character.CeilingCheck = transform.Find(ceilingCheckName).transform;
 
         rigidbody.freezeRotation = true;
         rigidbody.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
         rigidbody.gravityScale = gravityScale;
 
-        isFacingRight = 0 < transform.localScale.x;
-        velocityBoost = new Vector2(0, 0);
+        _character.IsFacingRight = 0 < transform.localScale.x;
+        _character.VelocityBoost = Vector2.zero;
     }
 
     // Update is called once per frame
     void Update()
     {
         // Movement
-        horizontalMovement = Input.GetAxisRaw("Horizontal");
-        if (horizontalMovement < 0 && isFacingRight)
+        _character.HorizontalMovement = Input.GetAxisRaw("Horizontal");
+        if (_character.HorizontalMovement < 0 && _character.IsFacingRight)
         {
             FlipCharacter();
         }
-        else if (0 < horizontalMovement && !isFacingRight)
+        else if (0 < _character.HorizontalMovement && !_character.IsFacingRight)
         {
             FlipCharacter();
         }
 
         if (Input.GetButtonDown("Jump") && CanJump())
         {
-            jumpTriggered = true;
+            _trigger.Jump = true;
         }
 
-        if (isGrounded && Input.GetAxisRaw("Vertical") < -0.45f)
+        if (_character.IsGrounded && Input.GetAxisRaw("Vertical") < -0.45f)
         {
-            isCrouching = true;
+            _character.IsCrouching = true;
         }
-        else if (!isGrounded && Input.GetAxisRaw("Vertical") < 0 && useGroundPound && groundPoundCooldownClock <= 0 && !abilitiesLocked)
+        else if (!_character.IsGrounded && Input.GetAxisRaw("Vertical") < 0 && _groundPoundSettings.UseGroundPound && _character.GroundPoundCooldownClock <= 0 && !_character.AbilitiesLocked)
         {
-            groundPoundTriggered = true;
+            _trigger.GroundPound = true;
         }
         else
         {
-            isCrouching = false;
+            _character.IsCrouching = false;
         }
 
-        if (Input.GetButtonDown("Fire1") && useDash && dashCooldownClock <= 0 && !abilitiesLocked)
+        if (Input.GetButtonDown("Fire1") && _dashSettings.UseDash && _character.DashCooldownClock <= 0 && !_character.AbilitiesLocked)
         {
-            Debug.Log("Fire");
-            dashTriggered = true;
+            _trigger.Dash = true;
         }
+
+        //Optional: Animation
+        SetAnimation(_character.MovementState);
     }
 
     void FixedUpdate()
     {
-        //Vector3 groundCheckPos = colliderBounds.min + new Vector3(colliderBounds.size.x * 0.5f, 0.1f, 0);
-        wallHugCheckLeftPos = hitBox.bounds.min + new Vector3(0.1f, hitBox.bounds.size.y * 0.5f, 0);
-        wallHugCheckRightPos = hitBox.bounds.max - new Vector3(0.1f, hitBox.bounds.size.y * 0.5f, 0);
-        wasGrounded = isGrounded;
-        isGrounded = HasContactWithObject(groundCheck.position);
-        hitHead = HasContactWithObject(ceilingCheck.position);
-        isWallHugging = HasContactWithObject(wallHugCheckLeftPos) || HasContactWithObject(wallHugCheckRightPos);
+        //Debug.Log(_character.MovementState.ToString());
+        SetCurrentStateVariables();
 
-        if (isGrounded && !wasGrounded)
+        if (_character.IsGrounded && !_character.WasGrounded)
         {
             OnLanding();
         }
 
         // Apply movement velocity
-        if (hitHead && 0 < rigidbody.velocity.y)
-        {
-            rigidbody.velocity = new Vector2(horizontalMovement * speed, 0);
-        }
-
-        velocityX = 0 < Mathf.Abs(velocityBoost.x) ? velocityBoost.x : (horizontalMovement * speed);
-        velocityY = 0 < Mathf.Abs(velocityBoost.y) ? velocityBoost.y : rigidbody.velocity.y;
-        rigidbody.velocity = new Vector2(lockVelocityX ? 0 : velocityX, lockVelocityY ? 0 : velocityY);
+        HandleMovement();
 
         //Crouching
-        if (isCrouching)
+        if (_character.IsCrouching)
         {
-            Debug.Log("Crouching");
-            rigidbody.velocity = new Vector2(0, 0);
-            hitBox.bounds.Expand(new Vector3(hitBox.bounds.size.x + 100, hitBox.bounds.size.y * 0.5f, 0)); //Not working
+            HandleCrouching();
         }
 
         // Wall movement
-        if (useWallClimb && isWallHugging && rigidbody.velocity.y <= 0 && (HasContactWithObject(wallHugCheckLeftPos) ? Input.GetAxisRaw("Horizontal") < 0 : 0 < Input.GetAxisRaw("Horizontal")))
+        if (_wallClimbSettings.UseWallClimb && _character.IsWallHugging && rigidbody.velocity.y <= 0 && (HasContactWithObject(_character.WallHugCheckLeftPos) ? Input.GetAxisRaw("Horizontal") < 0 : 0 < Input.GetAxisRaw("Horizontal")))
         {
-            OnLanding();
-            rigidbody.velocity = new Vector2(0, -wallSlideVelocity);
+            HandleWallMovement();
         }
 
         // Jumping
-        if (jumpTriggered && !isCrouching)
+        if (_trigger.Jump && !_character.IsCrouching && !_character.AbilitiesLocked)
         {
-            if (useWallClimb && isWallHugging)
-            {
-                horizontalMovement = HasContactWithObject(wallHugCheckLeftPos) ? wallJumpPushAwayForce : -wallJumpPushAwayForce;
-
-                velocityBoostCooldown = wallJumpAwayDuration;
-                velocityBoost = new Vector2(horizontalMovement, 0);
-            }
-            doubleJumpsDone++;
-            rigidbody.velocity = new Vector2(rigidbody.velocity.x, jumpForce);
-            jumpTriggered = false;
+            HandleJumping();
         }
 
         //Dashing
-        if (dashTriggered && !abilitiesLocked)
+        if (_trigger.Dash && !_character.AbilitiesLocked)
         {
-            abilitiesLocked = true;
-            velocityBoostCooldown = dashDuration;
-
-            velocityBoost = new Vector2(isFacingRight ? dashForce : dashForce * -1f, 0f);
-            lockVelocityY = dashLocksY;
-            dashCooldownClock = dashCooldown;
-            dashTriggered = false;
+            HandleDash();
         }
 
         //Ground Pound
-        if (groundPoundTriggered && !abilitiesLocked)
+        if (_trigger.GroundPound && !_character.AbilitiesLocked)
         {
-            abilitiesLocked = true;
-            killVelocityBoostOnLanding = true;
-            velocityBoostCooldown = 3f;
-
-            velocityBoost = new Vector2(0, -groundPoundVelocity);
-            lockVelocityX = groundPoundLocksX;
-            groundPoundCooldownClock = groundPoundCooldown;
-            groundPoundTriggered = false;
+            HandleGroundPound();
         }
 
-        if (playerCamera)
+        if (_cameraSettings.PlayerCamera)
         {
             CameraUpdate();
         }
 
+        //Cooldowns
         AbilityCooldown();
 
         // Debug lines
-        DrawDebugLines(wallHugCheckLeftPos, wallHugCheckRightPos);
+        DrawDebugLines(_character.WallHugCheckLeftPos, _character.WallHugCheckRightPos);
 
         //Velocity Boost
-        if (0 < velocityBoostCooldown)
+        HandleVelocityBoost();
+    }
+
+    void SetCurrentStateVariables()
+    {
+        _character.WallHugCheckLeftPos = hitBox.bounds.min + new Vector3(0.1f, hitBox.bounds.size.y * 0.5f, 0);
+        _character.WallHugCheckRightPos = hitBox.bounds.max - new Vector3(0.1f, hitBox.bounds.size.y * 0.5f, 0);
+        _character.WasGrounded = _character.IsGrounded;
+        _character.IsGrounded = HasContactWithObject(_character.GroundCheck.position);
+        _character.HitHead = HasContactWithObject(_character.CeilingCheck.position);
+        _character.IsWallHugging = HasContactWithObject(_character.WallHugCheckLeftPos) || HasContactWithObject(_character.WallHugCheckRightPos);
+    }
+
+    void HandleMovement()
+    {
+        if (_character.HitHead && 0 < rigidbody.velocity.y)
         {
-            velocityBoostCooldown -= Time.fixedDeltaTime;
-            velocityBoost = 0 < velocityBoostCooldown ? velocityBoost : new Vector2(0, 0);
+            rigidbody.velocity = new Vector2(_character.HorizontalMovement * speed, 0);
+        }
+
+        _character.VelocityX = 0 < Mathf.Abs(_character.VelocityBoost.x) ? _character.VelocityBoost.x : (_character.HorizontalMovement * speed);
+        _character.VelocityY = 0 < Mathf.Abs(_character.VelocityBoost.y) ? _character.VelocityBoost.y : rigidbody.velocity.y;
+        rigidbody.velocity = new Vector2(_character.LockVelocityX ? 0 : _character.VelocityX, _character.LockVelocityY ? 0 : _character.VelocityY);
+
+        if (0 < Mathf.Abs(_character.VelocityBoost.x) && rigidbody.velocity.x == 0 && _character.KillVelocityBoostOnHittingWall)
+        {
+            _character.KillVelocityBoostOnHittingWall = false;
+            _character.VelocityBoostCooldown = 0f;
+            HandleVelocityBoost();
+        }
+
+        SetMovementState();
+    }
+
+    private void SetMovementState()
+    {
+        if (_character.IsGrounded && rigidbody.velocity.x == 0)
+        {
+            _character.MovementState = MovementState.Idle;
+        }
+        if (_character.IsGrounded && 0 < Mathf.Abs(rigidbody.velocity.x) && !_character.AbilitiesLocked)
+        {
+            _character.MovementState = MovementState.Running;
+        }
+        if (!_character.IsGrounded && rigidbody.velocity.y < 0 && !_character.AbilitiesLocked)
+        {
+            _character.MovementState = MovementState.Falling;
+        }
+        else if (!_character.IsGrounded && 0 < rigidbody.velocity.y)
+        {
+            _character.MovementState = MovementState.Jumping;
+        }
+    }
+
+    void HandleCrouching()
+    {
+        _character.MovementState = MovementState.Crouching;
+        rigidbody.velocity = Vector2.zero;
+        hitBox.bounds.Expand(new Vector3(hitBox.bounds.size.x + 100, hitBox.bounds.size.y * 0.5f, 0)); //Not working
+    }
+
+    void HandleWallMovement()
+    {
+        _character.MovementState = MovementState.WallHugging;
+        OnLanding();
+        rigidbody.velocity = new Vector2(0, -_wallClimbSettings.WallSlideVelocity);
+    }
+
+    void HandleJumping()
+    {
+        if (_wallClimbSettings.UseWallClimb && _character.IsWallHugging)
+        {
+            _character.HorizontalMovement = HasContactWithObject(_character.WallHugCheckLeftPos) ? _wallClimbSettings.WallJumpPushAwayForce : -_wallClimbSettings.WallJumpPushAwayForce;
+
+            _character.VelocityBoostCooldown = _wallClimbSettings.WallJumpAwayDuration;
+            _character.VelocityBoost = new Vector2(_character.HorizontalMovement, 0);
+        }
+        _character.DoubleJumpsDone++;
+        rigidbody.velocity = new Vector2(rigidbody.velocity.x, jumpForce);
+        _trigger.Jump = false;
+    }
+
+    void HandleDash()
+    {
+        _character.MovementState = MovementState.Dashing;
+
+        _character.AbilitiesLocked = true;
+        _character.KillVelocityBoostOnHittingWall = true;
+        _character.VelocityBoostCooldown = _dashSettings.DashDuration;
+
+        _character.VelocityBoost = new Vector2(_character.IsFacingRight ? _dashSettings.DashForce : _dashSettings.DashForce * -1f, 0f);
+        _character.LockVelocityY = _dashSettings.DashLocksY;
+        _character.DashCooldownClock = _dashSettings.DashCooldown;
+        _trigger.Dash = false;
+    }
+
+    void HandleGroundPound()
+    {
+        _character.MovementState = MovementState.GroundPounding;
+
+        _character.AbilitiesLocked = true;
+        _character.KillVelocityBoostOnLanding = true;
+        _character.VelocityBoostCooldown = 3f;
+
+        _character.VelocityBoost = new Vector2(0, -_groundPoundSettings.GroundPoundVelocity);
+        _character.LockVelocityX = _groundPoundSettings.GroundPoundLocksX;
+        _character.GroundPoundCooldownClock = _groundPoundSettings.GroundPoundCooldown;
+        _trigger.GroundPound = false;
+    }
+
+    void AbilityCooldown()
+    {
+        _character.DashCooldownClock = _dashSettings.UseDash && 0 < _character.DashCooldownClock ? _character.DashCooldownClock - Time.fixedDeltaTime : 0f;
+        _character.GroundPoundCooldownClock = _groundPoundSettings.UseGroundPound && 0 < _character.GroundPoundCooldownClock ? _character.GroundPoundCooldownClock - Time.fixedDeltaTime : 0f;
+    }
+
+    void DrawDebugLines(Vector3 wallHugCheckLeftPos, Vector3 wallHugCheckRightPos)
+    {
+        Debug.DrawLine(_character.GroundCheck.position, _character.GroundCheck.position - new Vector3(0, nearObjectSensitivity, 0), _character.IsGrounded ? Color.green : Color.red);
+        Debug.DrawLine(_character.CeilingCheck.position, _character.CeilingCheck.position + new Vector3(0, nearObjectSensitivity, 0), _character.HitHead ? Color.green : Color.red);
+        Debug.DrawLine(wallHugCheckLeftPos, wallHugCheckLeftPos - new Vector3(nearObjectSensitivity, 0, 0), _character.IsWallHugging ? Color.green : Color.red);
+        Debug.DrawLine(wallHugCheckRightPos, wallHugCheckRightPos + new Vector3(nearObjectSensitivity, 0, 0), _character.IsWallHugging ? Color.green : Color.red);
+    }
+
+    void HandleVelocityBoost()
+    {
+        if (0 < _character.VelocityBoostCooldown)
+        {
+            _character.VelocityBoostCooldown -= Time.fixedDeltaTime;
+            _character.VelocityBoost = 0 < _character.VelocityBoostCooldown ? _character.VelocityBoost : Vector2.zero;
         }
         else
         {
-            velocityBoost = new Vector2(0, 0);
-            lockVelocityX = false;
-            lockVelocityY = false;
-            abilitiesLocked = false;
+            _character.VelocityBoost = Vector2.zero;
+            _character.LockVelocityX = false;
+            _character.LockVelocityY = false;
+            _character.AbilitiesLocked = false;
         }
-    }
-
-    private void AbilityCooldown()
-    {
-        dashCooldownClock = useDash && 0 < dashCooldownClock ? dashCooldownClock - Time.fixedDeltaTime : 0f;
-        groundPoundCooldownClock = useGroundPound && 0 < groundPoundCooldownClock ? groundPoundCooldownClock - Time.fixedDeltaTime : 0f;
-    }
-
-    private void DrawDebugLines(Vector3 wallHugCheckLeftPos, Vector3 wallHugCheckRightPos)
-    {
-        Debug.DrawLine(groundCheck.position, groundCheck.position - new Vector3(0, nearObjectSensitivity, 0), isGrounded ? Color.green : Color.red);
-        Debug.DrawLine(ceilingCheck.position, ceilingCheck.position + new Vector3(0, nearObjectSensitivity, 0), hitHead ? Color.green : Color.red);
-        Debug.DrawLine(wallHugCheckLeftPos, wallHugCheckLeftPos - new Vector3(nearObjectSensitivity, 0, 0), isWallHugging ? Color.green : Color.red);
-        Debug.DrawLine(wallHugCheckRightPos, wallHugCheckRightPos + new Vector3(nearObjectSensitivity, 0, 0), isWallHugging ? Color.green : Color.red);
     }
 
     void CameraUpdate()
     {
-        cameraX = smoothCamera ? Mathf.Lerp(playerCamera.transform.position.x, transform.position.x, cameraDamping * Time.fixedDeltaTime) : transform.position.x;
-        cameraY = smoothCamera ? Mathf.Lerp(playerCamera.transform.position.y, transform.position.y, cameraDamping * Time.fixedDeltaTime) : transform.position.y;
+        _camera.CameraX = _cameraSettings.SmoothCamera ? Mathf.Lerp(_cameraSettings.PlayerCamera.transform.position.x, transform.position.x, _cameraSettings.CameraDamping * Time.fixedDeltaTime) : transform.position.x;
+        _camera.CameraY = _cameraSettings.SmoothCamera ? Mathf.Lerp(_cameraSettings.PlayerCamera.transform.position.y, transform.position.y, _cameraSettings.CameraDamping * Time.fixedDeltaTime) : transform.position.y;
 
-        playerCamera.transform.position = new Vector3(cameraFollowX ? cameraX : playerCamera.transform.position.x, cameraFollowY ? cameraY : playerCamera.transform.position.y, -1f);
+        _cameraSettings.PlayerCamera.transform.position = new Vector3(_cameraSettings.CameraFollowX ? _camera.CameraX : _cameraSettings.PlayerCamera.transform.position.x, _cameraSettings.CameraFollowY ? _camera.CameraY : _cameraSettings.PlayerCamera.transform.position.y, -1f);
     }
 
     void FlipCharacter()
     {
-        isFacingRight = !isFacingRight;
+        _character.IsFacingRight = !_character.IsFacingRight;
         sprite.flipX = !sprite.flipX;
     }
 
@@ -277,38 +433,71 @@ public class PlayerController : MonoBehaviour
 
     void OnLanding()
     {
-        if (killVelocityBoostOnLanding)
+        if (_character.KillVelocityBoostOnLanding)
         {
-            velocityBoostCooldown = 0f;
-            killVelocityBoostOnLanding = false;
+            _character.VelocityBoostCooldown = 0f;
+            _character.KillVelocityBoostOnLanding = false;
+            _character.GroundPoundCooldownClock = 0f;
         }
 
-        if (useDoubleJump)
+        if (_doubleJumpSettings.UseDoubleJump)
         {
-            doubleJumpsDone = 0;
+            _character.DoubleJumpsDone = 0;
         }
     }
 
     bool CanJump()
     {
-        var returnValue = isGrounded;
-        if (useWallClimb)
+        var returnValue = _character.IsGrounded;
+        if (_wallClimbSettings.UseWallClimb)
         {
-            returnValue = isGrounded || isWallHugging;
+            returnValue = _character.IsGrounded || _character.IsWallHugging;
         }
-        if (useDoubleJump)
+        if (_doubleJumpSettings.UseDoubleJump)
         {
-            returnValue = isGrounded ? isGrounded : doubleJumpsDone < maxDoubleJumps;
+            returnValue = _character.IsGrounded ? _character.IsGrounded : _character.DoubleJumpsDone < _doubleJumpSettings.MaxDoubleJumps;
         }
 
         return returnValue;
     }
 
+    private void SetAnimation(MovementState newState)
+    {
+        if (animator != null)
+        {
+            animator.SetTrigger(newState.ToString());
+        }
+    }
+
+    private void AssertVitalComponents(string groundCheckName, string ceilingCheckName)
+    {
+        if (_cameraSettings.PlayerCamera == null)
+        {
+            Destroy(this);
+            throw new MissingComponentException("You have not assigned a camera in PlayerController's Camera Settings section.");
+        }
+        if (transform.Find(groundCheckName) == null)
+        {
+            Destroy(this);
+            throw new MissingComponentException($"You have not assigned a GameObject called \"{groundCheckName}\" as a child to {gameObject.name}. Place its Transform where the character meets the ground when grounded.");
+        }
+        if (transform.Find(ceilingCheckName) == null)
+        {
+            Destroy(this);
+            throw new MissingComponentException($"You have not assigned a GameObject called \"{ceilingCheckName}\" as a child to {gameObject.name}. Place its Transform where the character would hit the ceiling when jumping upward.");
+        }
+
+        if (animator == null)
+        {
+            Debug.LogWarning("No Animator found on object.");
+        }
+    }
+
     private void OnBecameInvisible()
     {
-        if (playerCamera)
+        if (_cameraSettings.PlayerCamera)
         {
-            playerCamera.transform.position = new Vector3(transform.position.x, transform.position.y, -1f);
+            _cameraSettings.PlayerCamera.transform.position = new Vector3(transform.position.x, transform.position.y, -1f);
         }
     }
 }
