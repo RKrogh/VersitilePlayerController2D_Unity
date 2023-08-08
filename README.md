@@ -4,6 +4,7 @@ The following code project is created as a template to simplify getting your 2D 
 It is designed to allow you to configure, rather than code. Inspired by the platformers from the 80s and 90s.
 
 This script will allow you to configure:
+```
     - Player movement, such as movement speed, crouching and jump force.
     - Double Jumps
     - Dash
@@ -11,6 +12,7 @@ This script will allow you to configure:
     - Ground Pound
     - Camera controlls, such as if the camera is to follow the player, if it is to be smooth or frame a "stage" etc.
     - Hook in sprite controll to player state.
+```
 
 ## Configuration
 
